@@ -59,6 +59,7 @@
 #include "Command.h"
 #include "Action.h"
 #include "Inventor/SoMouseWheelEvent.h"
+#include "SoTouchEvents.h"
 #include "MenuManager.h"
 #include "MouseSelection.h"
 #include "Navigation/NavigationAnimator.h"
@@ -2280,6 +2281,11 @@ SbBool NavigationStyle::processSoEvent(const SoEvent* const ev)
         offeredtoViewerEventBase = true;
     }
 
+    // handle touchpad pinch zoom, so it works under every navigation style
+    if (!processed && ev->isOfType(SoGesturePinchEvent::getClassTypeId())) {
+        processed = processPinchEvent(static_cast<const SoGesturePinchEvent*>(ev));
+    }
+
     if (!processed && !offeredtoViewerEventBase) {
         processed = viewer->processSoEventBase(ev);
     }
@@ -2534,9 +2540,66 @@ SbBool NavigationStyle::processWheelEvent(const SoMouseWheelEvent* const event)
 {
     const SbVec2s pos(event->getPosition());
     const SbVec2f posn = normalizePixelPos(pos);
+    SoCamera* camera = viewer->getSoRenderManager()->getCamera();
+
+    // Touchpad scheme on macOS, matching the platform convention (Fusion 360,
+    // Onshape): two-finger scroll pans, Shift + two-finger scroll orbits, pinch
+    // zooms. Cmd + scroll (Qt maps Cmd to ControlModifier on macOS) still zooms,
+    // keeping a keyboard route to it. Other platforms keep scroll-to-zoom.
+#ifdef Q_OS_MACOS
+    if (event->isPrecise() && event->wasShiftDown()) {
+        // camera-follows-fingers, the direction Fusion orbits in -- the opposite
+        // of the surface-follows-cursor convention FreeCAD's mouse drag uses
+        const SbVec2f center(0.5F, 0.5F);
+        spin_simplified(center - normalizePixelPos(event->getPixelDelta()), center);
+        return true;
+    }
+
+    if (event->isPrecise() && !event->wasCtrlDown()) {
+        setupPanningPlane(camera);
+        const float ratio =
+            viewer->getSoRenderManager()->getViewportRegion().getViewportAspectRatio();
+        panCamera(
+            camera,
+            ratio,
+            this->panningplane,
+            normalizePixelPos(event->getPixelDelta()),
+            SbVec2f(0, 0)
+        );
+        return true;
+    }
+#endif
 
     // handle mouse wheel zoom
-    doZoom(viewer->getSoRenderManager()->getCamera(), event->getDelta(), posn);
+    doZoom(camera, event->getDelta(), posn);
+    return true;
+}
+
+SbBool NavigationStyle::processPinchEvent(const SoGesturePinchEvent* const event)
+{
+    SoCamera* camera = viewer->getSoRenderManager()->getCamera();
+    if (!camera) {
+        return false;
+    }
+
+    if (event->state == SoGestureEvent::SbGSStart) {
+        setupPanningPlane(camera);
+        return true;
+    }
+
+    const SbVec2f posn = normalizePixelPos(event->curCenter);
+
+    if (event->deltaZoom > 0.0) {
+        doZoom(camera, -logf(float(event->deltaZoom)), posn);
+    }
+
+    const bool enableTilt = !(App::GetApplication()
+                                  .GetParameterGroupByPath("User parameter:BaseApp/Preferences/View")
+                                  ->GetBool("DisableTouchTilt", true));
+    if (event->deltaAngle != 0.0 && enableTilt) {
+        doRotate(camera, float(event->deltaAngle), posn);
+    }
+
     return true;
 }
 

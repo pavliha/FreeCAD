@@ -106,6 +106,7 @@
 #include <QSurfaceFormat>
 #include <QTimer>
 #include <QVariantAnimation>
+#include <QtMath>
 #include <QWheelEvent>
 
 #include <App/Document.h>
@@ -798,15 +799,72 @@ private:
     QPoint pressPosition;
     View3DInventorViewer* currentViewer = nullptr;
 
+    bool handleNativeGesture(QNativeGestureEvent* ev, View3DInventorViewer* viewer)
+    {
+        auto* navigation = viewer->navigationStyle();
+        if (!navigation) {
+            return false;
+        }
+
+        SoGesturePinchEvent pinch;
+        const QPoint local = viewer->mapFromGlobal(ev->globalPosition().toPoint());
+        const auto dpr = static_cast<double>(viewer->devicePixelRatio());
+        pinch.curCenter = SbVec2f(
+            float(local.x() * dpr),
+            float((double(viewer->height()) - local.y()) * dpr)
+        );
+        pinch.startCenter = pinch.curCenter;
+        pinch.setPosition(SbVec2s(pinch.curCenter));
+        pinch.setTime(SbTime::getTimeOfDay());
+
+        switch (ev->gestureType()) {
+            case Qt::BeginNativeGesture:
+                pinch.state = SoGestureEvent::SbGSStart;
+                break;
+            case Qt::EndNativeGesture:
+                pinch.state = SoGestureEvent::SbGSEnd;
+                break;
+            case Qt::ZoomNativeGesture:
+                pinch.state = SoGestureEvent::SbGSUpdate;
+                pinch.deltaZoom = 1.0 + ev->value();
+                break;
+            case Qt::RotateNativeGesture:
+                // the platform reports clockwise-positive degrees; deltaAngle is
+                // counterclockwise-positive radians, matching SoGesturePinchEvent
+                pinch.state = SoGestureEvent::SbGSUpdate;
+                pinch.deltaAngle = -qDegreesToRadians(ev->value());
+                break;
+            default:
+                return false;
+        }
+
+        navigation->processPinchEvent(&pinch);
+        return true;
+    }
+
 public:
     bool eventFilter(QObject* obj, QEvent* event) override
     {
+        if (event->type() == QEvent::NativeGesture) {
+            auto* viewer3d = qobject_cast<View3DInventorViewer*>(obj);
+            if (!viewer3d && obj->parent()) {
+                viewer3d = qobject_cast<View3DInventorViewer*>(obj->parent());
+            }
+            if (viewer3d
+                && handleNativeGesture(static_cast<QNativeGestureEvent*>(event), viewer3d)) {
+                event->accept();
+                return true;
+            }
+        }
+
         // Bug #0000607: Some mice also support horizontal scrolling which however might
         // lead to some unwanted zooming when pressing the MMB for panning.
-        // Thus, we filter out horizontal scrolling.
+        // Thus, we filter out horizontal scrolling -- but only for tilt wheels.
+        // Precision touchpads report a pixel delta and use both axes for panning.
         if (event->type() == QEvent::Wheel) {
             auto we = static_cast<QWheelEvent*>(event);  // NOLINT
-            if (qAbs(we->angleDelta().x()) > qAbs(we->angleDelta().y())) {
+            if (we->pixelDelta().isNull()
+                && qAbs(we->angleDelta().x()) > qAbs(we->angleDelta().y())) {
                 return true;
             }
         }
@@ -1282,6 +1340,10 @@ void View3DInventorViewer::init()
     // filter a few qt events
     viewerEventFilter = new ViewerEventFilter;
     installEventFilter(viewerEventFilter);
+    // Native trackpad gestures (macOS pinch/rotate) are delivered by Qt to the
+    // deepest widget under the cursor -- the GL viewport, not this view -- and
+    // never propagate up. The filter must therefore also watch the viewport.
+    viewport()->installEventFilter(viewerEventFilter);
 #if defined(USE_3DCONNEXION_NAVLIB)
     if (SpaceMouseParameter::instance()->getLegacySpaceMouseDevices()) {
         getEventFilter()->registerInputDevice(new SpaceNavigatorDevice);
@@ -1292,8 +1354,14 @@ void View3DInventorViewer::init()
     getEventFilter()->registerInputDevice(new GesturesDevice(this));
 
     try {
+        // On macOS pinch and rotate arrive as QNativeGestureEvents, handled in
+        // ViewerEventFilter. Qt's own gesture recognisers must stay out of the
+        // way there: grabbing them would synthesise a second, rotation-less
+        // pinch from the same fingers and zoom twice.
+#ifndef Q_OS_MACOS
         this->grabGesture(Qt::PanGesture);
         this->grabGesture(Qt::PinchGesture);
+#endif
     }
     catch (Base::Exception& e) {
         Base::Console().warning("Failed to set up gestures. Error: %s\n", e.what());

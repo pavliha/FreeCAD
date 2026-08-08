@@ -27,6 +27,7 @@
 
 #include <Inventor/events/SoEvent.h>
 #include <Inventor/events/SoSubEvent.h>
+#include <Inventor/SbLinear.h>
 #include <FCGlobal.h>
 
 /**
@@ -59,8 +60,24 @@ public:  // methods
     {
         this->delta = delta;
     }
+    /// pixel-precise scroll distance, non-null only on precision devices
+    /// (touchpads, Wayland, Windows Precision Touchpad). In device pixels,
+    /// y already flipped to GL orientation.
+    const SbVec2f& getPixelDelta() const
+    {
+        return pixelDelta;
+    }
+    void setPixelDelta(const SbVec2f& pixelDelta)
+    {
+        this->pixelDelta = pixelDelta;
+    }
+    bool isPrecise() const
+    {
+        return pixelDelta != SbVec2f(0.0F, 0.0F);
+    }
     ~SoMouseWheelEvent() override = default;
 
 private:  // data
     int delta;
+    SbVec2f pixelDelta {0.0F, 0.0F};
 };

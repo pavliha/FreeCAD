@@ -191,6 +191,14 @@ MouseP::mouseWheelEvent(QWheelEvent * event)
   // can be a lot lower
   this->wheel->setDelta(event->angleDelta().y());
 
+  // Precision devices (macOS/Wayland touchpads, Windows Precision Touchpads)
+  // additionally report a pixel-precise distance. It is in logical pixels and
+  // uses Qt's y-down orientation, so scale to device pixels and flip y to match
+  // the GL coordinates the navigation styles work in.
+  const QPoint pixels = event->pixelDelta();
+  const qreal dpr = publ->quarter->devicePixelRatio();
+  this->wheel->setPixelDelta(SbVec2f(float(pixels.x() * dpr), float(-pixels.y() * dpr)));
+
   return this->wheel;
 }
 
