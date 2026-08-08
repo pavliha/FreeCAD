@@ -2557,8 +2557,7 @@ SbBool NavigationStyle::processWheelEvent(const SoMouseWheelEvent* const event)
 
     if (event->isPrecise() && !event->wasCtrlDown()) {
         setupPanningPlane(camera);
-        const float ratio =
-            viewer->getSoRenderManager()->getViewportRegion().getViewportAspectRatio();
+        const float ratio = viewer->getSoRenderManager()->getViewportRegion().getViewportAspectRatio();
         panCamera(
             camera,
             ratio,

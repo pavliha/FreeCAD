@@ -809,10 +809,8 @@ private:
         SoGesturePinchEvent pinch;
         const QPoint local = viewer->mapFromGlobal(ev->globalPosition().toPoint());
         const auto dpr = static_cast<double>(viewer->devicePixelRatio());
-        pinch.curCenter = SbVec2f(
-            float(local.x() * dpr),
-            float((double(viewer->height()) - local.y()) * dpr)
-        );
+        pinch.curCenter
+            = SbVec2f(float(local.x() * dpr), float((double(viewer->height()) - local.y()) * dpr));
         pinch.startCenter = pinch.curCenter;
         pinch.setPosition(SbVec2s(pinch.curCenter));
         pinch.setTime(SbTime::getTimeOfDay());
@@ -850,8 +848,7 @@ public:
             if (!viewer3d && obj->parent()) {
                 viewer3d = qobject_cast<View3DInventorViewer*>(obj->parent());
             }
-            if (viewer3d
-                && handleNativeGesture(static_cast<QNativeGestureEvent*>(event), viewer3d)) {
+            if (viewer3d && handleNativeGesture(static_cast<QNativeGestureEvent*>(event), viewer3d)) {
                 event->accept();
                 return true;
             }
@@ -863,8 +860,7 @@ public:
         // Precision touchpads report a pixel delta and use both axes for panning.
         if (event->type() == QEvent::Wheel) {
             auto we = static_cast<QWheelEvent*>(event);  // NOLINT
-            if (we->pixelDelta().isNull()
-                && qAbs(we->angleDelta().x()) > qAbs(we->angleDelta().y())) {
+            if (we->pixelDelta().isNull() && qAbs(we->angleDelta().x()) > qAbs(we->angleDelta().y())) {
                 return true;
             }
         }
