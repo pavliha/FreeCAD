@@ -33,6 +33,46 @@
 #include "SoTouchEvents.h"
 
 
+bool NativeGesturePinch::update(Qt::NativeGestureType type, double value, const SbVec2f& center)
+{
+    if (type != Qt::BeginNativeGesture && !active) {
+        return false;
+    }
+
+    pinch.deltaZoom = 0.0;
+    pinch.deltaAngle = 0.0;
+    pinch.deltaCenter = SbVec2f(0.0F, 0.0F);
+    pinch.fromNativeGesture = true;
+    pinch.curCenter = center;
+    pinch.setPosition(SbVec2s(static_cast<short>(center[0]), static_cast<short>(center[1])));
+    pinch.setTime(SbTime::getTimeOfDay());
+
+    switch (type) {
+        case Qt::BeginNativeGesture:
+            pinch.state = SoGestureEvent::SbGSStart;
+            beginCenter = center;
+            active = true;
+            break;
+        case Qt::EndNativeGesture:
+            pinch.state = SoGestureEvent::SbGSEnd;
+            active = false;
+            break;
+        case Qt::ZoomNativeGesture:
+            pinch.state = SoGestureEvent::SbGSUpdate;
+            pinch.deltaZoom = 1.0 + value;
+            break;
+        case Qt::RotateNativeGesture:
+            pinch.state = SoGestureEvent::SbGSUpdate;
+            pinch.deltaAngle = -value * std::numbers::pi / 180.0;
+            break;
+        default:
+            return false;
+    }
+
+    pinch.startCenter = beginCenter;
+    return true;
+}
+
 SO_EVENT_SOURCE(SoGestureEvent);
 
 SbBool SoGestureEvent::isSoGestureEvent(const SoEvent* ev) const

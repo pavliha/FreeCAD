@@ -59,6 +59,7 @@
 #include "Command.h"
 #include "Action.h"
 #include "Inventor/SoMouseWheelEvent.h"
+#include "SoTouchEvents.h"
 #include "MenuManager.h"
 #include "MouseSelection.h"
 #include "Navigation/NavigationAnimator.h"
@@ -2280,6 +2281,10 @@ SbBool NavigationStyle::processSoEvent(const SoEvent* const ev)
         offeredtoViewerEventBase = true;
     }
 
+    if (!processed && ev->isOfType(SoGesturePinchEvent::getClassTypeId())) {
+        processed = processPinchEvent(static_cast<const SoGesturePinchEvent*>(ev));
+    }
+
     if (!processed && !offeredtoViewerEventBase) {
         processed = viewer->processSoEventBase(ev);
     }
@@ -2538,6 +2543,67 @@ SbBool NavigationStyle::processWheelEvent(const SoMouseWheelEvent* const event)
     // handle mouse wheel zoom
     doZoom(viewer->getSoRenderManager()->getCamera(), event->getDelta(), posn);
     return true;
+}
+
+SbBool NavigationStyle::processPinchEvent(const SoGesturePinchEvent* const event)
+{
+    SoCamera* camera = viewer->getSoRenderManager()->getCamera();
+    if (!camera) {
+        return false;
+    }
+
+    if (event->state == SoGestureEvent::SbGSStart) {
+        setupPanningPlane(camera);
+        return true;
+    }
+
+    if (event->state == SoGestureEvent::SbGSEnd) {
+        return true;
+    }
+
+    const bool touchTiltDisabled = App::GetApplication()
+                                       .GetParameterGroupByPath(
+                                           "User parameter:BaseApp/Preferences/View"
+                                       )
+                                       ->GetBool("DisableTouchTilt", true);
+    const PinchAction action = pinchAction(event, touchTiltDisabled);
+    const SbVec2f posn = normalizePixelPos(event->curCenter);
+
+    if (action.zoom) {
+        doZoom(camera, action.zoomLogFactor, posn);
+    }
+
+    if (action.rotate) {
+        doRotate(camera, action.rotateAngle, posn);
+    }
+
+    return true;
+}
+
+NavigationStyle::PinchAction NavigationStyle::pinchAction(
+    const SoGesturePinchEvent* const event,
+    bool touchTiltDisabled
+)
+{
+    PinchAction action;
+
+    if (event->state != SoGestureEvent::SbGSUpdate) {
+        return action;
+    }
+
+    if (event->deltaZoom > 0.0) {
+        action.zoom = true;
+        action.zoomLogFactor = -logf(static_cast<float>(event->deltaZoom));
+    }
+
+    const bool tiltBlocked = touchTiltDisabled && !event->fromNativeGesture;
+
+    if (event->deltaAngle != 0.0 && !tiltBlocked) {
+        action.rotate = true;
+        action.rotateAngle = static_cast<float>(event->deltaAngle);
+    }
+
+    return action;
 }
 
 void NavigationStyle::setPopupMenuEnabled(const SbBool on)
