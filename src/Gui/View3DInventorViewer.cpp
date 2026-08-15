@@ -798,22 +798,66 @@ private:
     QPoint pressPosition;
     View3DInventorViewer* currentViewer = nullptr;
 
-public:
-    bool eventFilter(QObject* obj, QEvent* event) override
+    NativeGesturePinch nativeGesturePinch;
+
+    static bool isUnwantedHorizontalScroll(const QWheelEvent* event)
+    {
+        if (!event->pixelDelta().isNull() && NavigationStyle::touchpadScrollPans()) {
+            return false;
+        }
+        return qAbs(event->angleDelta().x()) > qAbs(event->angleDelta().y());
+    }
+
+    bool handleNativeGesture(QObject* obj, QEvent* event)
+    {
+        if (event->type() != QEvent::NativeGesture) {
+            return false;
+        }
+        auto* viewer = qobject_cast<View3DInventorViewer*>(obj);
+        if (!viewer) {
+            viewer = qobject_cast<View3DInventorViewer*>(obj->parent());
+        }
+        if (!viewer) {
+            return false;
+        }
+        auto* navigation = viewer->navigationStyle();
+        if (!navigation) {
+            return false;
+        }
+
+        auto* ev = static_cast<QNativeGestureEvent*>(event);
+        const QPoint local = viewer->mapFromGlobal(ev->globalPosition().toPoint());
+        const auto dpr = static_cast<double>(viewer->devicePixelRatio());
+        const SbVec2f center(
+            static_cast<float>(local.x() * dpr),
+            static_cast<float>((viewer->height() - local.y()) * dpr)
+        );
+
+        if (!nativeGesturePinch.update(ev->gestureType(), ev->value(), center)) {
+            return false;
+        }
+
+        const bool handled = navigation->processPinchEvent(&nativeGesturePinch.event());
+        if (handled) {
+            event->accept();
+        }
+        return handled;
+    }
+
+    bool handleWheelAndSelectAll(View3DInventorViewer* viewer3d, QEvent* event)
     {
         // Bug #0000607: Some mice also support horizontal scrolling which however might
         // lead to some unwanted zooming when pressing the MMB for panning.
         // Thus, we filter out horizontal scrolling.
         if (event->type() == QEvent::Wheel) {
             auto we = static_cast<QWheelEvent*>(event);  // NOLINT
-            if (qAbs(we->angleDelta().x()) > qAbs(we->angleDelta().y())) {
+            if (isUnwantedHorizontalScroll(we)) {
                 return true;
             }
         }
         else if (event->type() == QEvent::KeyPress) {
             auto ke = static_cast<QKeyEvent*>(event);  // NOLINT
             if (ke->matches(QKeySequence::SelectAll)) {
-                auto* viewer3d = static_cast<View3DInventorViewer*>(obj);
                 auto* editingVP = viewer3d->getEditingViewProvider();
                 if (!editingVP || !editingVP->selectAll()) {
                     viewer3d->selectAll();
@@ -822,10 +866,11 @@ public:
             }
         }
 
-        if (Base::Sequencer().isRunning() && Base::Sequencer().isBlocking()) {
-            return false;
-        }
+        return false;
+    }
 
+    static bool isInvalidSpaceballEvent(QEvent* event)
+    {
         if (event->type() == Spaceball::ButtonEvent::ButtonEventType) {
             auto buttonEvent = static_cast<Spaceball::ButtonEvent*>(event);  // NOLINT
             if (!buttonEvent) {
@@ -841,10 +886,15 @@ public:
             }
         }
 
+        return false;
+    }
+
+    void trackLongPress(View3DInventorViewer* viewer3d, QEvent* event)
+    {
         if (event->type() == QEvent::MouseButtonPress) {
             auto mouseEvent = static_cast<QMouseEvent*>(event);
             if (mouseEvent->button() == Qt::LeftButton) {
-                currentViewer = static_cast<View3DInventorViewer*>(obj);
+                currentViewer = viewer3d;
                 pressPosition = mouseEvent->pos();
                 bool ctrlPressed = (mouseEvent->modifiers() & Qt::ControlModifier) != 0;
 
@@ -876,7 +926,33 @@ public:
                 }
             }
         }
+    }
 
+public:
+    bool eventFilter(QObject* obj, QEvent* event) override
+    {
+        if (handleNativeGesture(obj, event)) {
+            return true;
+        }
+
+        auto* viewer3d = qobject_cast<View3DInventorViewer*>(obj);
+        if (!viewer3d) {
+            return false;
+        }
+
+        if (handleWheelAndSelectAll(viewer3d, event)) {
+            return true;
+        }
+
+        if (Base::Sequencer().isRunning() && Base::Sequencer().isBlocking()) {
+            return false;
+        }
+
+        if (isInvalidSpaceballEvent(event)) {
+            return true;
+        }
+
+        trackLongPress(viewer3d, event);
         return false;
     }
 };
@@ -1028,6 +1104,14 @@ View3DInventorViewer::View3DInventorViewer(
     , _viewerPy(nullptr)
 {
     init();
+}
+
+void View3DInventorViewer::setupViewport(QWidget* widget)
+{
+    inherited::setupViewport(widget);
+    if (viewerEventFilter && widget) {
+        widget->installEventFilter(viewerEventFilter);
+    }
 }
 
 void View3DInventorViewer::init()
@@ -1282,6 +1366,7 @@ void View3DInventorViewer::init()
     // filter a few qt events
     viewerEventFilter = new ViewerEventFilter;
     installEventFilter(viewerEventFilter);
+    viewport()->installEventFilter(viewerEventFilter);
 #if defined(USE_3DCONNEXION_NAVLIB)
     if (SpaceMouseParameter::instance()->getLegacySpaceMouseDevices()) {
         getEventFilter()->registerInputDevice(new SpaceNavigatorDevice);
@@ -1292,8 +1377,10 @@ void View3DInventorViewer::init()
     getEventFilter()->registerInputDevice(new GesturesDevice(this));
 
     try {
+#ifndef Q_OS_MACOS
         this->grabGesture(Qt::PanGesture);
         this->grabGesture(Qt::PinchGesture);
+#endif
     }
     catch (Base::Exception& e) {
         Base::Console().warning("Failed to set up gestures. Error: %s\n", e.what());

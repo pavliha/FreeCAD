@@ -592,6 +592,7 @@ Q_SIGNALS:
     void cameraChanged();
 
 protected:
+    void setupViewport(QWidget* widget) override;
     static GLenum getInternalTextureFormat();
     void renderScene();
     void renderRubberbandOverlay();
@@ -728,7 +729,7 @@ private:
     std::string overrideMode;
     Gui::Document* guiDocument = nullptr;
 
-    ViewerEventFilter* viewerEventFilter;
+    ViewerEventFilter* viewerEventFilter {nullptr};
 
     PyObject* _viewerPy;
 

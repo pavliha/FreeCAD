@@ -61,6 +61,7 @@
 #include "Action.h"
 #include "Document.h"
 #include "Inventor/SoMouseWheelEvent.h"
+#include "SoTouchEvents.h"
 #include "MenuManager.h"
 #include "MouseSelection.h"
 #include "Navigation/NavigationAnimator.h"
@@ -2301,6 +2302,10 @@ SbBool NavigationStyle::processSoEvent(const SoEvent* const ev)
         offeredtoViewerEventBase = true;
     }
 
+    if (!processed && ev->isOfType(SoGesturePinchEvent::getClassTypeId())) {
+        processed = processPinchEvent(static_cast<const SoGesturePinchEvent*>(ev));
+    }
+
     if (!processed && !offeredtoViewerEventBase) {
         processed = viewer->processSoEventBase(ev);
     }
@@ -2551,14 +2556,116 @@ void NavigationStyle::replayDeferredMouseDownEvent()
     clearDeferredMouseDownEvent();
 }
 
+bool NavigationStyle::touchpadScrollPansByDefault()
+{
+#ifdef Q_OS_MACOS
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool NavigationStyle::touchpadScrollPans()
+{
+    return App::GetApplication()
+        .GetParameterGroupByPath("User parameter:BaseApp/Preferences/View")
+        ->GetBool("TouchpadScrollPans", touchpadScrollPansByDefault());
+}
+
 SbBool NavigationStyle::processWheelEvent(const SoMouseWheelEvent* const event)
 {
     const SbVec2s pos(event->getPosition());
     const SbVec2f posn = normalizePixelPos(pos);
+    SoCamera* camera = viewer->getSoRenderManager()->getCamera();
+
+    if (event->isPrecise() && touchpadScrollPans()) {
+        if (!camera) {
+            return true;
+        }
+
+        if (event->wasShiftDown()) {
+            const SbVec2f center(0.5F, 0.5F);
+            spin_simplified(center + normalizePixelPos(event->getPixelDelta()), center);
+            return true;
+        }
+
+        if (!event->wasCtrlDown()) {
+            setupPanningPlane(camera);
+            const float ratio
+                = viewer->getSoRenderManager()->getViewportRegion().getViewportAspectRatio();
+            panCamera(
+                camera,
+                ratio,
+                this->panningplane,
+                normalizePixelPos(event->getPixelDelta()),
+                SbVec2f(0, 0)
+            );
+            return true;
+        }
+    }
 
     // handle mouse wheel zoom
-    doZoom(viewer->getSoRenderManager()->getCamera(), event->getDelta(), posn);
+    doZoom(camera, event->getDelta(), posn);
     return true;
+}
+
+SbBool NavigationStyle::processPinchEvent(const SoGesturePinchEvent* const event)
+{
+    SoCamera* camera = viewer->getSoRenderManager()->getCamera();
+    if (!camera) {
+        return false;
+    }
+
+    if (event->state == SoGestureEvent::SbGSStart) {
+        setupPanningPlane(camera);
+        return true;
+    }
+
+    if (event->state == SoGestureEvent::SbGSEnd) {
+        return true;
+    }
+
+    const bool touchTiltDisabled = App::GetApplication()
+                                       .GetParameterGroupByPath(
+                                           "User parameter:BaseApp/Preferences/View"
+                                       )
+                                       ->GetBool("DisableTouchTilt", true);
+    const PinchAction action = pinchAction(event, touchTiltDisabled);
+    const SbVec2f posn = normalizePixelPos(event->curCenter);
+
+    if (action.zoom) {
+        doZoom(camera, action.zoomLogFactor, posn);
+    }
+
+    if (action.rotate) {
+        doRotate(camera, action.rotateAngle, posn);
+    }
+
+    return true;
+}
+
+NavigationStyle::PinchAction NavigationStyle::pinchAction(
+    const SoGesturePinchEvent* const event,
+    bool touchTiltDisabled
+)
+{
+    PinchAction action;
+
+    if (event->state != SoGestureEvent::SbGSUpdate) {
+        return action;
+    }
+
+    if (event->deltaZoom > 0.0) {
+        action.zoom = true;
+        action.zoomLogFactor = -logf(static_cast<float>(event->deltaZoom));
+    }
+
+    if (event->deltaAngle != 0.0 && !touchTiltDisabled) {
+        action.rotate = true;
+        action.rotateAngle = static_cast<float>(event->deltaAngle);
+    }
+
+    return action;
 }
 
 void NavigationStyle::setPopupMenuEnabled(const SbBool on)
