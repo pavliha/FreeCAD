@@ -798,9 +798,55 @@ private:
     QPoint pressPosition;
     View3DInventorViewer* currentViewer = nullptr;
 
+    NativeGesturePinch nativeGesturePinch;
+
+    bool handleNativeGesture(QObject* obj, QEvent* event)
+    {
+        if (event->type() != QEvent::NativeGesture) {
+            return false;
+        }
+        auto* viewer = qobject_cast<View3DInventorViewer*>(obj);
+        if (!viewer) {
+            viewer = qobject_cast<View3DInventorViewer*>(obj->parent());
+        }
+        if (!viewer) {
+            return false;
+        }
+        auto* navigation = viewer->navigationStyle();
+        if (!navigation) {
+            return false;
+        }
+
+        auto* ev = static_cast<QNativeGestureEvent*>(event);
+        const QPoint local = viewer->mapFromGlobal(ev->globalPosition().toPoint());
+        const auto dpr = static_cast<double>(viewer->devicePixelRatio());
+        const SbVec2f center(
+            static_cast<float>(local.x() * dpr),
+            static_cast<float>((viewer->height() - local.y()) * dpr)
+        );
+
+        if (!nativeGesturePinch.update(ev->gestureType(), ev->value(), center)) {
+            return false;
+        }
+
+        const bool handled = navigation->processPinchEvent(&nativeGesturePinch.event());
+        if (handled) {
+            event->accept();
+        }
+        return handled;
+    }
+
 public:
     bool eventFilter(QObject* obj, QEvent* event) override
     {
+        if (handleNativeGesture(obj, event)) {
+            return true;
+        }
+
+        if (!qobject_cast<View3DInventorViewer*>(obj)) {
+            return false;
+        }
+
         // Bug #0000607: Some mice also support horizontal scrolling which however might
         // lead to some unwanted zooming when pressing the MMB for panning.
         // Thus, we filter out horizontal scrolling.
@@ -1028,6 +1074,14 @@ View3DInventorViewer::View3DInventorViewer(
     , _viewerPy(nullptr)
 {
     init();
+}
+
+void View3DInventorViewer::setupViewport(QWidget* widget)
+{
+    inherited::setupViewport(widget);
+    if (viewerEventFilter && widget) {
+        widget->installEventFilter(viewerEventFilter);
+    }
 }
 
 void View3DInventorViewer::init()
@@ -1282,6 +1336,7 @@ void View3DInventorViewer::init()
     // filter a few qt events
     viewerEventFilter = new ViewerEventFilter;
     installEventFilter(viewerEventFilter);
+    viewport()->installEventFilter(viewerEventFilter);
 #if defined(USE_3DCONNEXION_NAVLIB)
     if (SpaceMouseParameter::instance()->getLegacySpaceMouseDevices()) {
         getEventFilter()->registerInputDevice(new SpaceNavigatorDevice);
@@ -1292,8 +1347,10 @@ void View3DInventorViewer::init()
     getEventFilter()->registerInputDevice(new GesturesDevice(this));
 
     try {
+#ifndef Q_OS_MACOS
         this->grabGesture(Qt::PanGesture);
         this->grabGesture(Qt::PinchGesture);
+#endif
     }
     catch (Base::Exception& e) {
         Base::Console().warning("Failed to set up gestures. Error: %s\n", e.what());

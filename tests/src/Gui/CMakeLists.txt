@@ -14,6 +14,8 @@ add_executable(Gui_tests_run
         StyleParameters/ParameterManagerTest.cpp
         StyleParameters/YamlParameterSourceTest.cpp
         InputHintTest.cpp
+        NativeGesturePinchTest.cpp
+        NavigationStylePinchTest.cpp
         SelectionTest.cpp
 )
 

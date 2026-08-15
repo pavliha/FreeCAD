@@ -27,6 +27,7 @@
 #include <Inventor/SbLinear.h>
 #include <Inventor/events/SoEvent.h>
 #include <Inventor/events/SoSubEvent.h>
+#include <FCGlobal.h>
 
 class QWidget;
 
@@ -100,8 +101,28 @@ public:
     double totalZoom;  // zoom factor accumulated since start of gesture.
     double deltaAngle;
     double totalAngle;
+    bool fromNativeGesture {false};
 
     static double unbranchAngle(double ang);
+};
+
+class GuiExport NativeGesturePinch
+{
+public:
+    bool update(Qt::NativeGestureType type, double value, const SbVec2f& center);
+    const SoGesturePinchEvent& event() const
+    {
+        return pinch;
+    }
+    bool isActive() const
+    {
+        return active;
+    }
+
+private:
+    SoGesturePinchEvent pinch;
+    SbVec2f beginCenter {0.0F, 0.0F};
+    bool active {false};
 };
 
 class SoGestureSwipeEvent: public SoGestureEvent
