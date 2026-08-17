@@ -291,6 +291,7 @@ jobs:
   # conda-based build, distinguished by an "experimental" file name. This path is non-blocking (the
   # reusable workflow's Build job uses continue-on-error), so a failure here never fails the release.
   windows_experimental:
+    if: false  # macOS-only fork build
     needs: upload_src
     permissions:
       contents: write
