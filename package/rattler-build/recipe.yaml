@@ -107,6 +107,7 @@ requirements:
         - cross-python_${{ target_platform }}
 
   host:
+    - defusedxml
     - eigen >=3.3,<5
     - fmt >=12.1,<12.2
     - freetype
