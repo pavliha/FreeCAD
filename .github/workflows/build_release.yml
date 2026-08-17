@@ -230,7 +230,7 @@ jobs:
           fi
           python3 package/scripts/write_version_info.py ../freecad_version.txt
           cd package/rattler-build
-          pixi install --frozen
+          pixi install
 
       - name: Azure login for Windows build code signing
         id: azure_login
