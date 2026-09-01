@@ -96,6 +96,7 @@ SetupZipIos()
 SetupClipper2()
 find_package(fmt REQUIRED)
 find_package(ICU REQUIRED COMPONENTS uc i18n)
+find_package(cpptrace QUIET)
 if(NOT FREECAD_LIBPACK_USE OR FREECAD_LIBPACK_CHECKFILE_CLBUNDLER OR FREECAD_LIBPACK_CHECKFILE_VERSION)
     SetupPython()
     SetupPCL()
@@ -143,10 +144,6 @@ if(NOT FREECAD_LIBPACK_USE OR FREECAD_LIBPACK_CHECKFILE_CLBUNDLER OR FREECAD_LIB
         find_python_runtime_dep(pillow PIL pillow_VERSION "Assembly simulation video export will not work properly.")
     endif()
 endif()
-
-if(BUILD_VR)
-    find_package(Rift)
-endif(BUILD_VR)
 
 SetLibraryVersions()
 SetGlobalCompilerAndLinkerSettings()
